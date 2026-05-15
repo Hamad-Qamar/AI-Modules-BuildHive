@@ -9,6 +9,8 @@ Replaces the monolithic `products.csv` architecture with multiple structured fil
   - city_area_standards.csv
   - phase_labor_mapping.csv
 
+Data is loaded via `phase2_repository` (CSV by default, or Supabase when PHASE2_SOURCE=supabase).
+
 This module centralises loading + lookup logic so other modules (recommendations,
 chatbot purchase flow, cost estimation) can share one consistent view.
 """
@@ -16,24 +18,17 @@ chatbot purchase flow, cost estimation) can share one consistent view.
 from __future__ import annotations
 
 import logging
-import os
-from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
 
+from .phase2_repository import Phase2Paths, get_phase2_repository
+
 logger = logging.getLogger(__name__)
 
-
-@dataclass(frozen=True)
-class Phase2Paths:
-    materials_master: str = "materials_master.csv"
-    pricing_data: str = "pricing_data.csv"
-    construction_rates: str = "construction_rates.csv"
-    labor_rates: str = "labor_rates.csv"
-    city_area_standards: str = "city_area_standards.csv"
-    phase_labor_mapping: str = "phase_labor_mapping.csv"
+# Re-export for backward compatibility
+__all__ = ["Phase2DataStore", "Phase2Paths"]
 
 
 class Phase2DataStore:
@@ -48,7 +43,7 @@ class Phase2DataStore:
         self.phase_labor_mapping: pd.DataFrame = pd.DataFrame()
 
         self._marla_sqft_by_city: Dict[str, float] = {}
-        self._price_avg: Dict[Tuple[str, str], float] = {}      # (material_id, city) -> avg
+        self._price_avg: Dict[Tuple[str, str], float] = {}  # (material_id, city) -> avg
         self._price_minmax: Dict[Tuple[str, str], Tuple[float, float]] = {}
 
         self._loaded = False
@@ -57,27 +52,21 @@ class Phase2DataStore:
         if self._loaded:
             return
 
-        def _read(path: str) -> pd.DataFrame:
-            if os.path.exists(path):
-                return pd.read_csv(path)
-            alt = os.path.join(os.getcwd(), path)
-            if os.path.exists(alt):
-                return pd.read_csv(alt)
-            logger.warning("Phase-2 file missing: %s", path)
-            return pd.DataFrame()
-
-        self.city_area = _read(self.paths.city_area_standards)
-        self.materials_master = _read(self.paths.materials_master)
-        self.pricing_data = _read(self.paths.pricing_data)
-        self.construction_rates = _read(self.paths.construction_rates)
-        self.labor_rates = _read(self.paths.labor_rates)
-        self.phase_labor_mapping = _read(self.paths.phase_labor_mapping)
+        bundle = get_phase2_repository(paths=self.paths).load_all()
+        self.city_area = bundle.city_area
+        self.materials_master = bundle.materials_master
+        self.pricing_data = bundle.pricing_data
+        self.construction_rates = bundle.construction_rates
+        self.labor_rates = bundle.labor_rates
+        self.phase_labor_mapping = bundle.phase_labor_mapping
 
         # City marla sqft
         if not self.city_area.empty:
             for _, r in self.city_area.iterrows():
                 city = str(r.get("city", "")).strip().lower()
                 sqft = float(r.get("marla_sqft", 0) or 0)
+                if abs(sqft - 272.25) < 1e-6 or abs(sqft - 272.5) < 1e-6:
+                    sqft = 272.0
                 if city and sqft > 0:
                     self._marla_sqft_by_city[city] = sqft
 
@@ -131,4 +120,3 @@ class Phase2DataStore:
             maxs = [b for _, b in vals]
             return float(min(mins)), float(max(maxs))
         return 0.0, 0.0
-

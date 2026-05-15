@@ -18,6 +18,7 @@ Key design principles (v2 spec):
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from collections import OrderedDict
@@ -688,9 +689,16 @@ class RecommendationModule:
                 return default
 
         est_qty, est_cost = self._estimate_item_quantity(row, area_sqft)
+        
+        # Extract description and phase from materials_master
+        description = _ss(row.get("description"), "")
+        phase = _ss(row.get("phase")) or None
+        
         item: Dict[str, Any] = {
             "material_id":        _ss(row.get("material_id")) or None,
             "item_name":          _ss(row.get("item_name")),
+            "description":        description,  # Now included at top level
+            "phase":              phase,         # Now included at top level
             "brand":              _ss(row.get("brand"), ""),
             "quality_grade":      _ss(row.get("quality_grade"), "standard"),
             "unit":               _ss(row.get("unit"), "unit"),
@@ -705,7 +713,6 @@ class RecommendationModule:
                 "city_match":     round(_sf(row.get("city_match")), 2),
             },
             "meta": {
-                "phase": _ss(row.get("phase")) or None,
                 "subcategory": _ss(row.get("subcategory")) or None,
                 "functional_tag": _ss(row.get("functional_tag")) or None,
                 "room_type": _ss(row.get("room_type"), "general"),

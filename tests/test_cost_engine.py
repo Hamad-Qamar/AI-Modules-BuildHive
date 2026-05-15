@@ -6,11 +6,16 @@ locked in.
 """
 
 import pytest
+import pandas as pd
 
 from ai_modules.cost_estimation_module import (
     AREA_CONVERSIONS,
     CostEstimationModule,
+    GREY_BOQ_MIN_STEEL_KG_PER_SQFT,
     PRICE_PACK_SIZE,
+    _apply_grey_structure_boq_minimums,
+    _brick_target_from_wall_geometry,
+    _structural_steel_kg_mask,
 )
 
 
@@ -143,10 +148,10 @@ def test_quality_tiers_have_clear_delta(cost):
     std = cost.estimate_project_cost(
         sqft=1361, grade="standard", city="Lahore", bedrooms=2, washrooms=2, kitchens=1,
     )
-    lux = cost.estimate_project_cost(
-        sqft=1361, grade="luxury", city="Lahore", bedrooms=2, washrooms=2, kitchens=1,
+    prm = cost.estimate_project_cost(
+        sqft=1361, grade="premium", city="Lahore", bedrooms=2, washrooms=2, kitchens=1,
     )
-    assert lux["breakdown"]["summary"]["grand_total"] > std["breakdown"]["summary"]["grand_total"] * 1.18
+    assert prm["breakdown"]["summary"]["grand_total"] > std["breakdown"]["summary"]["grand_total"] * 1.18
 
 
 def test_unsupported_city_returns_error(cost):
@@ -156,7 +161,7 @@ def test_unsupported_city_returns_error(cost):
 
 def test_feasibility_clamps_bedrooms_for_small_plot(cost):
     r = cost.estimate_project_cost(
-        225, grade="standard", city="Lahore", bedrooms=5, washrooms=1, kitchens=1,
+        550, grade="standard", city="Lahore", bedrooms=5, washrooms=1, kitchens=1,
     )
     assert r["status"] == "success"
     assert r["feasibility"]["clamped"] is True
@@ -165,7 +170,7 @@ def test_feasibility_clamps_bedrooms_for_small_plot(cost):
 
 def test_turnkey_mep_finishing_minimums_and_labour_floors(cost):
     """Scaled BOQ + labour floors for full construction (not limited to a single reference plot)."""
-    sq = int(cost.parse_area("1 marla"))
+    sq = int(cost.parse_area("2 marla"))
     r = cost.estimate_project_cost(
         sqft=sq,
         grade="standard",
@@ -197,9 +202,9 @@ def test_turnkey_mep_finishing_minimums_and_labour_floors(cost):
 
 
 def test_grey_structure_small_house_no_negative_layout_and_realistic_band(cost):
-    """1-marla-class grey must not inherit turnkey negative bath deltas; BOQ/labour stay credible."""
+    """Small (2-marla-class) grey must not inherit turnkey negative bath deltas; BOQ/labour stay credible."""
     r = cost.estimate_project_cost(
-        sqft=225,
+        sqft=550,
         grade="standard",
         city="Lahore",
         construction_type="grey_structure",
@@ -207,8 +212,8 @@ def test_grey_structure_small_house_no_negative_layout_and_realistic_band(cost):
     )
     assert r["status"] == "success"
     grand = float(r["breakdown"]["summary"]["grand_total"])
-    assert grand > 400_000, grand
-    assert grand < 2_000_000, grand
+    assert grand > 800_000, grand
+    assert grand < 3_500_000, grand
     keys = " ".join(r.get("itemized_breakdown", {}).keys()).lower()
     assert "layout vs typical anchor" not in keys
     assert any("grey package labour (realism floor)" in k.lower() for k in r["itemized_breakdown"])
@@ -221,6 +226,54 @@ def test_floor_factors_multi_floor(cost):
     assert r["status"] == "success"
     assert r["floor_factors"]["floors"] == 2
     assert r["floor_factors"]["structural_blend_mult"] > 0
+
+
+def test_brick_target_wall_geometry_formula():
+    """4√A × (10 ft × floors) × 144 in²/ft² ÷ 27 in² per brick (9\"×3\" face); A = per-floor covered sqft."""
+    one_floor = _brick_target_from_wall_geometry(272, 1)
+    assert one_floor == pytest.approx((4.0 * (272**0.5) * 10.0 * 144.0) / 27.0, rel=1e-6)
+    assert one_floor == pytest.approx(3518.37, rel=0.001)
+    two_floor = _brick_target_from_wall_geometry(272, 2)
+    assert two_floor == pytest.approx(2.0 * one_floor, rel=1e-6)
+
+
+def test_structural_steel_kg_mask_matches_rebar_and_rcc_labelled_rows():
+    df = pd.DataFrame(
+        {
+            "category": ["steel", "rcc", "steel"],
+            "name": ["Steel rebar (sarya) for structure", "RCC steel rebar (sarya)", "Welded mesh panel"],
+            "unit": ["kg", "kg", "kg"],
+        }
+    )
+    m = _structural_steel_kg_mask(df)
+    assert m.tolist() == [True, True, False]
+
+
+def test_grey_boq_merges_duplicate_sarya_rows_across_categories():
+    total_sqft = 272.0
+    tgt = GREY_BOQ_MIN_STEEL_KG_PER_SQFT * total_sqft
+    mm_q = pd.DataFrame(
+        {
+            "category": ["steel", "rcc"],
+            "name": ["Steel rebar (sarya) for structure", "RCC steel rebar (sarya)"],
+            "unit": ["kg", "kg"],
+            "quantity_raw": [300.0, 400.0],
+            "phase": ["Grey Structure", "Grey Structure"],
+        }
+    )
+    out, touched, merged = _apply_grey_structure_boq_minimums(
+        mm_q,
+        total_sqft,
+        "full_construction",
+        footprint_sqft=272.0,
+        floors=1,
+    )
+    assert merged is True
+    assert touched is True
+    assert float(out["quantity_raw"].sum()) == pytest.approx(tgt, rel=1e-6)
+    nonzero = out[out["quantity_raw"] > 0]
+    assert len(nonzero) == 1
+    assert float(nonzero.iloc[0]["quantity_raw"]) == pytest.approx(tgt, rel=1e-6)
 
 
 def test_brick_line_uses_per_brick_pricing(cost):

@@ -51,15 +51,15 @@ def _within(x: float, lo: float, hi: float) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_001_one_marla_one_floor_one_bed_min_viable(cost: CostEstimationModule):
-    sq = _sqft(cost, "1 marla")
+def test_001_two_marla_one_floor_one_bed_min_viable(cost: CostEstimationModule):
+    sq = _sqft(cost, "2 marla")
     r = cost.estimate_project_cost(sqft=sq, floors=1, grade="standard", city="Lahore", bedrooms=1)
     _assert_success(r)
     assert _grand_total(r) > 100_000  # must not be 0 / absurdly tiny
 
 
-def test_002_one_marla_two_floors_upper_floor_cheaper_distribution(cost: CostEstimationModule):
-    sq = _sqft(cost, "1 marla")
+def test_002_two_marla_two_floors_upper_floor_cheaper_distribution(cost: CostEstimationModule):
+    sq = _sqft(cost, "2 marla")
     r = cost.estimate_project_cost(sqft=sq, floors=2, grade="standard", city="Lahore", bedrooms=1)
     _assert_success(r)
     fb = (r.get("floor_breakdown") or {})
@@ -74,7 +74,7 @@ def test_003_two_marla_single_room_no_overestimate(cost: CostEstimationModule):
     sq = _sqft(cost, "2 marla")
     r = cost.estimate_project_cost(sqft=sq, floors=1, grade="standard", city="Lahore", bedrooms=1, washrooms=1, kitchens=0)
     _assert_success(r)
-    # sanity cap: should not exceed luxury-like rates for a minimal layout
+    # sanity cap: should not exceed top-tier-like rates for a minimal layout
     assert _cost_per_sqft(r) < 10_000
 
 
@@ -103,13 +103,13 @@ def test_006_five_marla_two_floor_scaling(cost: CostEstimationModule):
     assert _grand_total(r2) < _grand_total(r1) * 2.4
 
 
-def test_007_five_marla_luxury_higher_than_standard(cost: CostEstimationModule):
+def test_007_five_marla_premium_higher_than_standard(cost: CostEstimationModule):
     sq = _sqft(cost, "5 marla")
     std = cost.estimate_project_cost(sqft=sq, floors=1, grade="standard", city="Lahore", bhk=3)
-    lux = cost.estimate_project_cost(sqft=sq, floors=1, grade="luxury", city="Lahore", bhk=3)
+    prm = cost.estimate_project_cost(sqft=sq, floors=1, grade="premium", city="Lahore", bhk=3)
     _assert_success(std)
-    _assert_success(lux)
-    assert _grand_total(lux) > _grand_total(std) * 1.15
+    _assert_success(prm)
+    assert _grand_total(prm) > _grand_total(std) * 1.15
 
 
 def test_008_five_marla_economy_lower_than_standard(cost: CostEstimationModule):
@@ -167,9 +167,14 @@ def test_011_to_020_layout_variations_increase_cost(cost: CostEstimationModule, 
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_021_very_small_area_400_sqft_should_reject_by_min_marla_rule(cost: CostEstimationModule):
-    # Engine enforces >= 1 marla equivalent. In Lahore min is ~225, so 400 should be OK.
+def test_021_below_two_marla_sqft_rejected(cost: CostEstimationModule):
+    # Engine enforces >= 2 marla equivalent (~544 sqft in default Lahore card).
     r = cost.estimate_project_cost(sqft=400, grade="standard", city="Lahore", bhk=1)
+    assert r.get("status") == "error"
+
+
+def test_021b_two_marla_sqft_floor_estimates(cost: CostEstimationModule):
+    r = cost.estimate_project_cost(sqft=550, grade="standard", city="Lahore", bhk=1)
     _assert_success(r)
     assert _cost_per_sqft(r) < 20_000  # avoid absurd per-sqft spikes
 
@@ -419,13 +424,13 @@ def test_065_finishing_only_is_30_to_40_percent(cost: CostEstimationModule):
     raise AssertionError("No finishing-only mode to validate percentage.")
 
 
-def test_066_luxury_house_higher_end_materials(cost: CostEstimationModule):
+def test_066_premium_house_higher_end_materials(cost: CostEstimationModule):
     sq = _sqft(cost, "10 marla")
     std = cost.estimate_project_cost(sqft=sq, grade="standard", city="Lahore", bhk=4)
-    lux = cost.estimate_project_cost(sqft=sq, grade="luxury", city="Lahore", bhk=4)
+    prm = cost.estimate_project_cost(sqft=sq, grade="premium", city="Lahore", bhk=4)
     _assert_success(std)
-    _assert_success(lux)
-    assert _grand_total(lux) > _grand_total(std) * 1.15
+    _assert_success(prm)
+    assert _grand_total(prm) > _grand_total(std) * 1.15
 
 
 def test_067_economy_house_lower_bound_pricing(cost: CostEstimationModule):
@@ -455,7 +460,7 @@ def test_070_labor_increase_moderate_impact(cost: CostEstimationModule):
 def test_071_to_075_mix_market_variations_no_crash(cost: CostEstimationModule):
     # Smoke matrix across grades and construction types (supported ones).
     sq = _sqft(cost, "6 marla")
-    for grade in ("economy", "standard", "premium", "luxury"):
+    for grade in ("economy", "standard", "premium"):
         for ctype in ("grey_structure", "full_construction", "renovation"):
             r = cost.estimate_project_cost(
                 sqft=sq,
@@ -486,7 +491,7 @@ def test_077_negative_area_must_reject(cost: CostEstimationModule):
 
 def test_078_100_floors_no_crash_and_reasonable_output(cost: CostEstimationModule):
     # There is no hard cap; validate stability (no overflow / exceptions).
-    r = cost.estimate_project_cost(sqft=225, floors=100, grade="standard", city="Lahore", construction_type="grey_structure", bhk=1)
+    r = cost.estimate_project_cost(sqft=550, floors=100, grade="standard", city="Lahore", construction_type="grey_structure", bhk=1)
     _assert_success(r)
     ff = r.get("floor_factors") or {}
     assert int(ff.get("floors", 0)) == 100
@@ -523,9 +528,9 @@ def test_082_only_rooms_given_should_fail_or_infer_area(cost: CostEstimationModu
     assert r.get("status") == "error"
 
 
-def test_083_very_high_luxury_no_overflow(cost: CostEstimationModule):
+def test_083_very_high_premium_no_overflow(cost: CostEstimationModule):
     sq = _sqft(cost, "1 kanal")
-    r = cost.estimate_project_cost(sqft=sq, grade="luxury", city="Lahore", floors=3, bhk=6)
+    r = cost.estimate_project_cost(sqft=sq, grade="premium", city="Lahore", floors=3, bhk=6)
     _assert_success(r)
     assert _grand_total(r) < 1_000_000_000  # <1B PKR sanity
 
@@ -614,7 +619,7 @@ def test_095_api_response_time_under_1s_smoke(cost: CostEstimationModule):
 def test_096_complex_multi_floor_villa_no_lag(cost: CostEstimationModule):
     sq = _sqft(cost, "1 kanal")
     t0 = time.perf_counter()
-    r = cost.estimate_project_cost(sqft=sq, floors=3, grade="luxury", city="Lahore", bedrooms=6, washrooms=5, kitchens=2)
+    r = cost.estimate_project_cost(sqft=sq, floors=3, grade="premium", city="Lahore", bedrooms=6, washrooms=5, kitchens=2)
     t1 = time.perf_counter()
     _assert_success(r)
     assert (t1 - t0) < 3.5
@@ -647,7 +652,7 @@ def test_099_stress_test_with_max_inputs_stable(cost: CostEstimationModule):
     r = cost.estimate_project_cost(
         sqft=sq,
         floors=8,
-        grade="luxury",
+        grade="premium",
         city="Lahore",
         bedrooms=99,
         washrooms=99,

@@ -48,7 +48,8 @@ If you don’t see recent changes, do a hard refresh: **Ctrl+Shift+R**.
   - `chatbot_module.py`: chatbot orchestration + deterministic utility/safety layer.
   - `recommendation_module.py`: materials recommendation logic (uses `materials.index`).
   - `cost_estimation_module.py`: BOQ + labour + benchmark logic (Phase-2 CSVs).
-  - `data_store.py`: loads Phase-2 CSVs and city marla standards.
+  - `data_store.py`: loads Phase-2 tabular data (CSV or Supabase) and city marla standards.
+  - `phase2_repository.py`: single loader for Phase-2 tables (`PHASE2_SOURCE=csv|supabase`).
 
 ### Data files (runtime inputs)
 
@@ -129,6 +130,26 @@ Key safeguards implemented in `ai_modules/cost_estimation_module.py`:
 
 ---
 
+## Phase-2 data source (CSV vs Supabase)
+
+By default the backend reads the six Phase-2 CSVs from the project root (same as before). To load the same tables from **Supabase Postgres** instead:
+
+1. Create a Supabase project and apply the schema in `supabase/migrations/0001_phase2_tables.sql` (SQL Editor or Supabase migrations).
+2. Seed rows from your local CSVs (Table Editor import, or `python scripts/seed_supabase_from_csv.py` with env set).
+3. Set environment variables on the server (never expose the service role key to the browser or frontend bundles):
+
+| Variable | Purpose |
+| --- | --- |
+| `PHASE2_SOURCE` | `csv` (default) or `supabase` |
+| `SUPABASE_URL` | Project URL, e.g. `https://<ref>.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only key with full DB access |
+
+When `PHASE2_SOURCE=supabase`, custom CSV path arguments passed into `CostEstimationModule` are ignored; all six tables are fetched from Supabase.
+
+Hosting: add the same three variables to your platform’s secret/env configuration (Render, Fly, Railway, etc.).
+
+---
+
 ## Running tests
 
 Run all tests:
@@ -145,8 +166,9 @@ If you update your Phase‑2 CSVs and want to regenerate derived artifacts, use 
 
 - `generate_phase2.py`
 - `sync_prices.py`
+- `scripts/seed_supabase_from_csv.py` — upserts CSV rows into Supabase (requires `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`).
 
-Note: these are **build utilities**, not required at runtime.
+Note: these are **build utilities**, not required at runtime unless you use Supabase for Phase-2.
 
 ---
 

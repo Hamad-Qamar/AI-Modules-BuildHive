@@ -14,8 +14,16 @@ import logging
 import pandas as pd
 import numpy as np
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()  # .env: PHASE2_SOURCE, SUPABASE_*, etc.
+except ImportError:
+    pass
+
 # Import AI Modules
 from ai_modules import ChatBotModule, RecommendationModule, CostEstimationModule
+from ai_modules.cost_estimation_module import normalize_city_key
 
 # Logging
 logging.basicConfig(level=logging.INFO)
@@ -114,7 +122,6 @@ class CostEstimationRequest(BaseModel):
     washrooms: int = 0
     kitchens: int = 0
     compare: bool = False
-    apply_market_benchmark: bool = True
     use_llm: bool = True
 
 
@@ -297,7 +304,7 @@ async def estimate_cost_endpoint(request: CostEstimationRequest):
             use_llm=request.use_llm,
         )
 
-    city_key = (request.city or "").strip().lower()
+    city_key = normalize_city_key(request.city or "")
     if cost_estimation._supported_pricing_cities and city_key not in cost_estimation._supported_pricing_cities:
         return JSONResponse(
             status_code=400,
@@ -320,7 +327,6 @@ async def estimate_cost_endpoint(request: CostEstimationRequest):
         bhk=request.bhk,
         timeline_months=request.timeline_months,
         compare=request.compare,
-        apply_market_benchmark=request.apply_market_benchmark,
         use_llm=request.use_llm,
     )
 
