@@ -7,6 +7,7 @@ Controlled by env:
 Supabase (server-side only):
   SUPABASE_URL
   SUPABASE_SERVICE_ROLE_KEY
+  SUPABASE_SSL_VERIFY=true|false  (set false on dev machines with broken CA store)
 """
 
 from __future__ import annotations
@@ -19,6 +20,33 @@ from typing import Any, Dict, List, Optional, Protocol, Sequence
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+def _env_truthy(name: str, default: bool = True) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _supabase_httpx_client() -> Any:
+    """Build httpx client for Supabase (handles Windows CA / corporate proxy issues)."""
+    import httpx
+
+    if not _env_truthy("SUPABASE_SSL_VERIFY", default=True):
+        logger.warning(
+            "SUPABASE_SSL_VERIFY=false — TLS certificate verification disabled for Supabase"
+        )
+        return httpx.Client(verify=False)
+
+    verify: Any = True
+    try:
+        import certifi
+
+        verify = certifi.where()
+    except ImportError:
+        pass
+    return httpx.Client(verify=verify)
 
 
 def _snake_column_names(df: pd.DataFrame) -> pd.DataFrame:
@@ -208,11 +236,16 @@ class SupabasePhase2Repository:
         if self._client is None:
             try:
                 from supabase import create_client  # type: ignore
+                from supabase.lib.client_options import SyncClientOptions  # type: ignore
             except ImportError as e:
                 raise RuntimeError(
                     "Install the Supabase client: pip install supabase"
                 ) from e
-            self._client = create_client(self._url, self._key)
+            self._client = create_client(
+                self._url,
+                self._key,
+                options=SyncClientOptions(httpx_client=_supabase_httpx_client()),
+            )
         return self._client
 
     def _fetch_table(self, name: str) -> pd.DataFrame:
@@ -262,7 +295,6 @@ class SupabasePhase2Repository:
                 .in_("material_id", part)
                 .execute()
             )
-            out_rows.extend(list(resp.data or []))
             out_rows.extend(list(resp.data or []))
         if not out_rows:
             return pd.DataFrame()

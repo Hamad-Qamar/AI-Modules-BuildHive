@@ -21,6 +21,15 @@ try:
 except ImportError:
     pass
 
+# Prefer certifi CA bundle for Hugging Face / httpx when system store is incomplete.
+try:
+    import certifi
+
+    os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+    os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
+except ImportError:
+    pass
+
 # Import AI Modules
 from ai_modules import ChatBotModule, RecommendationModule, CostEstimationModule
 from ai_modules.cost_estimation_module import normalize_city_key
