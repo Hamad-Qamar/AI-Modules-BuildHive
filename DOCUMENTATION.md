@@ -146,7 +146,28 @@ By default the backend reads the six Phase-2 CSVs from the project root (same as
 
 When `PHASE2_SOURCE=supabase`, custom CSV path arguments passed into `CostEstimationModule` are ignored; all six tables are fetched from Supabase.
 
-Hosting: add the same three variables to your platform’s secret/env configuration (Render, Fly, Railway, etc.).
+### Deployment (Option A — Supabase only, no CSVs in the image)
+
+Cloud logs like `Phase-2 CSV missing` mean the server is still on **CSV mode** or the env vars are not set. Do this on your host (Render, Railway, Fly, etc.):
+
+1. In Supabase: apply `supabase/migrations/0001_phase2_tables.sql` and seed the six tables (Table Editor or `scripts/seed_supabase_from_csv.py`).
+2. In the platform **Environment / Secrets** UI, set:
+   - `PHASE2_SOURCE=supabase`
+   - `SUPABASE_URL` — your project URL (`https://<ref>.supabase.co`)
+   - `SUPABASE_SERVICE_ROLE_KEY` — **server only**; never expose in frontend or public repos
+3. Redeploy / restart the service. Check `GET /health`: `recommendation` and `cost_estimation` should be `online`.
+
+Optional: `SUPABASE_SSL_VERIFY=false` only for broken CA stores (prefer fixing TLS in production). See `.env.example` for a full template.
+
+### Railway — Hugging Face embedding model (`all-MiniLM-L6-v2`)
+
+Recommendation + chatbot need SentenceTransformer weights. If logs show **cannot connect to huggingface.co** / **cannot find them in cached files**, the deployed image never downloaded them (cold runtime often blocks or rate-limits the Hub).
+
+**Recommended:** Deploy with the repo **`Dockerfile`**. The build runs `scripts/prefetch_embedding_model.py` once into `HF_HOME`; runtime uses **`HF_HUB_OFFLINE=1`** and **`TRANSFORMERS_OFFLINE=1`** so startup does not need Hub access.
+
+If the **build** also cannot reach the Hub, set a Hugging Face [access token](https://huggingface.co/settings/tokens) (`HF_TOKEN`) for the Docker **build**.
+
+**Without Docker:** Add a Railway build step that runs `python scripts/prefetch_embedding_model.py` after `pip install`, then mirror the same **`HF_HOME`** plus offline flags at runtime.
 
 ---
 
